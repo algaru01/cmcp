@@ -27,12 +27,6 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
 
   int i, j, ld=M+2;
 
-  // for(i=0; i<4; i++){
-  //   req_tmp[i] = MPI_REQUEST_NULL;
-  // }
-
-  MPI_Request req_tmp[] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
-
   if (next < nProc){
     MPI_Send_init(x+nLocal*ld, ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req[0]);
     sol++;
@@ -53,7 +47,6 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
     sol++;
   }
 
-  //MPI_Startall(sol, req);
   for(i=0; i<4; i++){
     if (req[i] != MPI_REQUEST_NULL)
       MPI_Start(&req[i]);
@@ -63,7 +56,6 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
     for (j=1; j<=M; j++)
       t[i*ld+j] = (b[i*ld+j] + x[(i+1)*ld+j] + x[(i-1)*ld+j] + x[i*ld+(j+1)] + x[i*ld+(j-1)])/4.0;
 
-  //MPI_Waitall(sol, req, stat);
   for(i=0; i<4; i++){
     if (req[i] != MPI_REQUEST_NULL)
       MPI_Wait(&req[i], stat);
@@ -75,10 +67,6 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
   for (j=1; j<=M; j++)
     t[nLocal*ld+j] = (b[nLocal*ld+j] + x[(nLocal+1)*ld+j] + x[(nLocal-1)*ld+j] + x[nLocal*ld+(j+1)] + x[nLocal*ld+(j-1)])/4.0;
 
-
-  // for (i=0; i<4; i++)
-  //   MPI_Request_free(&req_tmp[i]);
-  
 }
 
 /*
@@ -122,7 +110,6 @@ void jacobi_poisson(int nLocal,int M,double *x,double *b, int myId)
 
     MPI_Allreduce(&s_local, &s, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     conv = (sqrt(s)<tol);
-    //printf("Error en iteración %d: %g\n", k, sqrt(s));
 
     /* siguiente iteración */
     k = k+1;
@@ -141,6 +128,7 @@ int main(int argc, char **argv)
 {
   int i, j, N=60, M=60, ld;
   double *x, *b, *res, h=0.01, f=1.5;
+  double t1, t2;
 
   /* Extracción de argumentos */
   if (argc > 1) { /* El usuario ha indicado el valor de N */
@@ -151,7 +139,6 @@ int main(int argc, char **argv)
   }
   ld = M+2;  /* leading dimension */
 
-  MPI_Status stat;
   int myId, nProc;
   MPI_Init(&argc,&argv);
   MPI_Comm_size(MPI_COMM_WORLD, &nProc);
@@ -170,7 +157,12 @@ int main(int argc, char **argv)
   }
 
   /* Resolución del sistema por el método de Jacobi */
+  t1 = MPI_Wtime();
   jacobi_poisson(nLocal, M, x, b, myId);
+  t2 = MPI_Wtime();
+  
+  if(myId == 0)
+    printf("Tiempo transcurrido %fs.\n", t2 - t1);
 
   if(myId == 0)
     res = malloc((N+2)*(M+2)*sizeof(double));
@@ -180,6 +172,7 @@ int main(int argc, char **argv)
 
 
   /* Imprimir solución (solo para comprobación, se omite en el caso de problemas grandes) */
+  /*
   if (N<=60 && myId == 0) {
     for (i=1; i<=N; i++) {
       for (j=1; j<=M; j++) {
@@ -188,6 +181,7 @@ int main(int argc, char **argv)
       printf("\n");
     }
   }
+*/
 
   free(x);
   free(b);
