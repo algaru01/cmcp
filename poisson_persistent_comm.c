@@ -20,54 +20,50 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
   int prev, next, nProc; MPI_Status stat[1];
   MPI_Comm_size(MPI_COMM_WORLD, &nProc);
 
-  MPI_Request req[4] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
   int sol = 0;
 
   prev = myId-1; next = myId+1;
 
   int i, j, ld=M+2;
 
-  // for(i=0; i<4; i++){
-  //   req_tmp[i] = MPI_REQUEST_NULL;
-  // }
-
-  MPI_Request req_tmp[] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
+  MPI_Request req_tmp[4] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
 
   if (next < nProc){
-    MPI_Send_init(x+nLocal*ld, ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req[0]);
+    MPI_Send_init(x+nLocal*ld, ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req_tmp[0]);
     sol++;
   }
 
   if (prev >= 0){
-    MPI_Recv_init(x, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req[1]);
+    MPI_Recv_init(x, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req_tmp[1]);
     sol++;
   }
 
   if (prev >= 0){
-    MPI_Send_init(x+1*ld, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req[2]);
+    MPI_Send_init(x+1*ld, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req_tmp[2]);
     sol++;
   }
 
   if (next < nProc){
-    MPI_Recv_init(x+((nLocal+1)*ld), ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req[3]);
+    MPI_Recv_init(x+((nLocal+1)*ld), ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req_tmp[3]);
     sol++;
   }
 
-  //MPI_Startall(sol, req);
+  MPI_Request req[sol];
+  int pos=0;
   for(i=0; i<4; i++){
-    if (req[i] != MPI_REQUEST_NULL)
-      MPI_Start(&req[i]);
+    if (req_tmp[i] != MPI_REQUEST_NULL){
+      req[pos] = req_tmp[i];
+      pos++;
+    }
   }
+
+  MPI_Startall(sol, req);
 
   for (i=2; i<=(nLocal-1); i++)
     for (j=1; j<=M; j++)
       t[i*ld+j] = (b[i*ld+j] + x[(i+1)*ld+j] + x[(i-1)*ld+j] + x[i*ld+(j+1)] + x[i*ld+(j-1)])/4.0;
 
-  //MPI_Waitall(sol, req, stat);
-  for(i=0; i<4; i++){
-    if (req[i] != MPI_REQUEST_NULL)
-      MPI_Wait(&req[i], stat);
-  }
+  MPI_Waitall(sol, req, stat);
 
   for (j=1; j<=M; j++)
     t[1*ld+j] = (b[1*ld+j] + x[(1+1)*ld+j] + x[(1-1)*ld+j] + x[1*ld+(j+1)] + x[1*ld+(j-1)])/4.0;
@@ -76,8 +72,8 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
     t[nLocal*ld+j] = (b[nLocal*ld+j] + x[(nLocal+1)*ld+j] + x[(nLocal-1)*ld+j] + x[nLocal*ld+(j+1)] + x[nLocal*ld+(j-1)])/4.0;
 
 
-  // for (i=0; i<4; i++)
-  //   MPI_Request_free(&req_tmp[i]);
+  for (i=0; i<sol; i++)
+    MPI_Request_free(&req[i]);
   
 }
 
