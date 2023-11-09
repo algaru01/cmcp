@@ -15,66 +15,26 @@
  *   Se asume que x,b,t son de dimensión (N+2)*(M+2), se recorren solo los puntos interiores
  *   de la malla, y en los bordes están almacenadas las condiciones de frontera (por defecto 0).
  */
-void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int myId)
-{
-  int prev, next, nProc; MPI_Status stat[1];
-  MPI_Comm_size(MPI_COMM_WORLD, &nProc);
+void jacobi_step_parallel(int nLocal, int M, double *x, double *b, double *t, MPI_Request *req) {
+    int i, j, ld = M + 2;
 
-  int sol = 0;
+    MPI_Startall(4, req);
 
-  prev = myId-1; next = myId+1;
+    for (i = 2; i <= (nLocal - 1); i++)
+        for (j = 1; j <= M; j++)
+            t[i * ld + j] = (b[i * ld + j] + x[(i + 1) * ld + j] + x[(i - 1) * ld + j] + x[i * ld + (j + 1)] +
+                             x[i * ld + (j - 1)]) / 4.0;
 
-  int i, j, ld=M+2;
+    MPI_Waitall(4, req, MPI_STATUSES_IGNORE);
 
-  MPI_Request req_tmp[4] = {MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL, MPI_REQUEST_NULL};
+    for (j = 1; j <= M; j++)
+        t[1 * ld + j] = (b[1 * ld + j] + x[(1 + 1) * ld + j] + x[(1 - 1) * ld + j] + x[1 * ld + (j + 1)] +
+                         x[1 * ld + (j - 1)]) / 4.0;
 
-  if (next < nProc){
-    MPI_Send_init(x+nLocal*ld, ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req_tmp[0]);
-    sol++;
-  }
-
-  if (prev >= 0){
-    MPI_Recv_init(x, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req_tmp[1]);
-    sol++;
-  }
-
-  if (prev >= 0){
-    MPI_Send_init(x+1*ld, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req_tmp[2]);
-    sol++;
-  }
-
-  if (next < nProc){
-    MPI_Recv_init(x+((nLocal+1)*ld), ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req_tmp[3]);
-    sol++;
-  }
-
-  MPI_Request req[sol];
-  int pos=0;
-  for(i=0; i<4; i++){
-    if (req_tmp[i] != MPI_REQUEST_NULL){
-      req[pos] = req_tmp[i];
-      pos++;
-    }
-  }
-
-  MPI_Startall(sol, req);
-
-  for (i=2; i<=(nLocal-1); i++)
-    for (j=1; j<=M; j++)
-      t[i*ld+j] = (b[i*ld+j] + x[(i+1)*ld+j] + x[(i-1)*ld+j] + x[i*ld+(j+1)] + x[i*ld+(j-1)])/4.0;
-
-  MPI_Waitall(sol, req, stat);
-
-  for (j=1; j<=M; j++)
-    t[1*ld+j] = (b[1*ld+j] + x[(1+1)*ld+j] + x[(1-1)*ld+j] + x[1*ld+(j+1)] + x[1*ld+(j-1)])/4.0;
-
-  for (j=1; j<=M; j++)
-    t[nLocal*ld+j] = (b[nLocal*ld+j] + x[(nLocal+1)*ld+j] + x[(nLocal-1)*ld+j] + x[nLocal*ld+(j+1)] + x[nLocal*ld+(j-1)])/4.0;
-
-
-  for (i=0; i<sol; i++)
-    MPI_Request_free(&req[i]);
-  
+    for (j = 1; j <= M; j++)
+        t[nLocal * ld + j] =
+                (b[nLocal * ld + j] + x[(nLocal + 1) * ld + j] + x[(nLocal - 1) * ld + j] + x[nLocal * ld + (j + 1)] +
+                 x[nLocal * ld + (j - 1)]) / 4.0;
 }
 
 /*
@@ -93,102 +53,130 @@ void jacobi_step_parallel(int nLocal, int M,double *x,double *b,double *t, int m
  *   Suponemos que las condiciones de contorno son igual a 0 en toda la
  *   frontera del dominio.
  */
-void jacobi_poisson(int nLocal,int M,double *x,double *b, int myId)
-{
-  int i, j, k, ld=M+2, conv, maxit=10000;
-  double *t, s_local, s, tol=1e-6;
+void jacobi_poisson(int nLocal, int M, double *x, double *b) {
+    int i, j, k, ld = M + 2, conv, maxit = 10000, prev, next, p, rank;
+    double *t, s_local, s, tol = 1e-6;
+    MPI_Request req[4];
 
-  t = (double*)calloc((nLocal+2)*(M+2),sizeof(double));
+    MPI_Comm_size(MPI_COMM_WORLD, &p);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  k = 0;
-  conv = 0;
+    t = (double *) calloc((nLocal + 2) * (M + 2), sizeof(double));
 
-  while (!conv && k<maxit) {
+    k = 0;
+    conv = 0;
 
-    /* calcula siguiente vector */
-    jacobi_step_parallel(nLocal, M, x, b, t, myId);
-
-    /* criterio de parada: ||x_{k}-x_{k+1}||<tol */
-    s_local = 0.0; s = 0.0;
-    for (i=1; i<=nLocal; i++) {
-      for (j=1; j<=M; j++) {
-        s_local += (x[i*ld+j]-t[i*ld+j])*(x[i*ld+j]-t[i*ld+j]);
-      }
+    if (rank == 0) {
+        prev = MPI_PROC_NULL;
+    } else {
+        prev = rank - 1;
+    }
+    if (rank == p - 1) {
+        next = MPI_PROC_NULL;
+    } else {
+        next = rank + 1;
     }
 
-    MPI_Allreduce(&s_local, &s, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    conv = (sqrt(s)<tol);
-    //printf("Error en iteración %d: %g\n", k, sqrt(s));
+    MPI_Send_init(x + nLocal * ld, ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req[0]);
+    MPI_Recv_init(x, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req[1]);
 
-    /* siguiente iteración */
-    k = k+1;
-    for (i=1; i<=nLocal; i++) {
-      for (j=1; j<=M; j++) {
-        x[i*ld+j] = t[i*ld+j];
-      }
+    MPI_Send_init(x + 1 * ld, ld, MPI_DOUBLE, prev, 22, MPI_COMM_WORLD, &req[2]);
+    MPI_Recv_init(x + ((nLocal + 1) * ld), ld, MPI_DOUBLE, next, 22, MPI_COMM_WORLD, &req[3]);
+
+    while (!conv && k < maxit) {
+
+        /* calcula siguiente vector */
+        jacobi_step_parallel(nLocal, M, x, b, t, req);
+
+        /* criterio de parada: ||x_{k}-x_{k+1}||<tol */
+        s_local = 0.0;
+        s = 0.0;
+        for (i = 1; i <= nLocal; i++) {
+            for (j = 1; j <= M; j++) {
+                s_local += (x[i * ld + j] - t[i * ld + j]) * (x[i * ld + j] - t[i * ld + j]);
+            }
+        }
+
+        MPI_Allreduce(&s_local, &s, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        conv = (sqrt(s) < tol);
+        //printf("Error en iteración %d: %g\n", k, sqrt(s));
+
+        /* siguiente iteración */
+        k = k + 1;
+        for (i = 1; i <= nLocal; i++) {
+            for (j = 1; j <= M; j++) {
+                x[i * ld + j] = t[i * ld + j];
+            }
+        }
+
     }
 
-  }
-
-  free(t);
+    free(t);
+    MPI_Request_free(req);
 }
 
-int main(int argc, char **argv)
-{
-  int i, j, N=60, M=60, ld;
-  double *x, *b, *res, h=0.01, f=1.5;
+int main(int argc, char **argv) {
+    int i, j, N = 60, M = 60, ld;
+    double *x, *b, *res, h = 0.01, f = 1.5, t1, t2;
 
-  /* Extracción de argumentos */
-  if (argc > 1) { /* El usuario ha indicado el valor de N */
-    if ((N = atoi(argv[1])) < 0) N = 60;
-  }
-  if (argc > 2) { /* El usuario ha indicado el valor de M */
-    if ((M = atoi(argv[2])) < 0) M = 60;
-  }
-  ld = M+2;  /* leading dimension */
-
-  MPI_Status stat;
-  int myId, nProc;
-  MPI_Init(&argc,&argv);
-  MPI_Comm_size(MPI_COMM_WORLD, &nProc);
-  MPI_Comm_rank(MPI_COMM_WORLD, &myId);
-
-  /* Reserva de memoria */
-  int nLocal = N/nProc;
-  x = (double*)calloc((nLocal+2)*(M+2),sizeof(double));
-  b = (double*)calloc((nLocal+2)*(M+2),sizeof(double));
-
-  /* Inicializar datos */
-  for (i=1; i<=nLocal; i++) {
-    for (j=1; j<=M; j++) {
-      b[i*ld+j] = h*h*f;  /* suponemos que la función f es constante en todo el dominio */
+    /* Extracción de argumentos */
+    if (argc > 1) { /* El usuario ha indicado el valor de N */
+        if ((N = atoi(argv[1])) < 0) N = 60;
     }
-  }
-
-  /* Resolución del sistema por el método de Jacobi */
-  jacobi_poisson(nLocal, M, x, b, myId);
-
-  if(myId == 0)
-    res = malloc((N+2)*(M+2)*sizeof(double));
-  
-  MPI_Gather(x+ld, (nLocal)*(M+2), MPI_DOUBLE, res+ld, (nLocal)*(M+2), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-
-
-  /* Imprimir solución (solo para comprobación, se omite en el caso de problemas grandes) */
-  if (N<=60 && myId == 0) {
-    for (i=1; i<=N; i++) {
-      for (j=1; j<=M; j++) {
-        printf("%g ", res[i*ld+j]);
-      }
-      printf("\n");
+    if (argc > 2) { /* El usuario ha indicado el valor de M */
+        if ((M = atoi(argv[2])) < 0) M = 60;
     }
-  }
+    ld = M + 2;  /* leading dimension */
 
-  free(x);
-  free(b);
+    int myId, nProc;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &nProc);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myId);
 
-  MPI_Finalize();
-  return 0;
+    /* Reserva de memoria */
+    int nLocal = N / nProc;
+    x = (double *) calloc((nLocal + 2) * (M + 2), sizeof(double));
+    b = (double *) calloc((nLocal + 2) * (M + 2), sizeof(double));
+
+    /* Inicializar datos */
+    for (i = 1; i <= nLocal; i++) {
+        for (j = 1; j <= M; j++) {
+            b[i * ld + j] = h * h * f;  /* suponemos que la función f es constante en todo el dominio */
+        }
+    }
+
+    /* Resolución del sistema por el método de Jacobi */
+    t1 = MPI_Wtime();
+
+    jacobi_poisson(nLocal, M, x, b);
+
+    t2 = MPI_Wtime();
+
+    if(myId == 0) {
+        printf("Tiempo transcurrido %fs,\n", t2 - t1);
+    }
+
+    if (myId == 0)
+        res = malloc((N + 2) * (M + 2) * sizeof(double));
+
+    MPI_Gather(x + ld, (nLocal) * (M + 2), MPI_DOUBLE, res + ld, (nLocal) * (M + 2), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+
+
+    /* Imprimir solución (solo para comprobación, se omite en el caso de problemas grandes) */
+//    if (N <= 60 && myId == 0) {
+//        for (i = 1; i <= N; i++) {
+//            for (j = 1; j <= M; j++) {
+//                printf("%g ", res[i * ld + j]);
+//            }
+//            printf("\n");
+//        }
+//    }
+
+    free(x);
+    free(b);
+
+    MPI_Finalize();
+    return 0;
 }
 
