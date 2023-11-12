@@ -110,7 +110,7 @@ void jacobi_poisson(int nLocal, int M, double *x, double *b) {
         }
 
     }
-
+  
     free(t);
     MPI_Request_free(req);
 }
@@ -161,8 +161,6 @@ int main(int argc, char **argv) {
 
     MPI_Gather(x + ld, (nLocal) * (M + 2), MPI_DOUBLE, res + ld, (nLocal) * (M + 2), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-
-
     /* Imprimir solución (solo para comprobación, se omite en el caso de problemas grandes) */
 //    if (N <= 60 && myId == 0) {
 //        for (i = 1; i <= N; i++) {
@@ -179,4 +177,3 @@ int main(int argc, char **argv) {
     MPI_Finalize();
     return 0;
 }
-
