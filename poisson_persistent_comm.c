@@ -161,6 +161,18 @@ int main(int argc, char **argv) {
 
     MPI_Gather(x + ld, (nLocal) * (M + 2), MPI_DOUBLE, res + ld, (nLocal) * (M + 2), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+    if (myId == 0) {
+        FILE *file;
+        file = fopen("res_poisson.txt", "w");
+        for (i = 1; i <= N; i++) {
+            for (j = 1; j <= M; j++) {
+                fprintf(file, "%g ", res[i * ld + j]);
+            }
+            fprintf(file, "\n");
+        }
+        fclose(file);
+    }
+
     /* Imprimir solución (solo para comprobación, se omite en el caso de problemas grandes) */
 //    if (N <= 60 && myId == 0) {
 //        for (i = 1; i <= N; i++) {
