@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
         file = fopen("res_poisson.txt", "w");
         for (i = 1; i <= N; i++) {
             for (j = 1; j <= M; j++) {
-                fprintf(file, "%g ", res[i * ld + j]);
+                fprintf(file, "%.9f\t", res[i * ld + j]);
             }
             fprintf(file, "\n");
         }
