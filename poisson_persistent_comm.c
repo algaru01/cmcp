@@ -28,7 +28,7 @@ int validation(int N, int M){
 
     returnValue = system("cmp res_poisson.txt res_poisson_par.txt");
 
-    system("rm res_poisson.txt res_poisson_par.txt")
+    system("rm res_poisson.txt res_poisson_par.txt");
 }
 
 void jacobi_step_parallel(int nLocal, int M, double *x, double *b, double *t, MPI_Request *req) {
@@ -189,9 +189,9 @@ int main(int argc, char **argv) {
         fclose(file);
         int check = validation(N, M);
         if (check == 0) {
-            printf("El resultado es correcto");
+            printf("El resultado es correcto\n");
         } else {
-            printf("El resultado no es correcto");
+            printf("El resultado no es correcto\n");
         }
     }
 
