@@ -15,6 +15,22 @@
  *   Se asume que x,b,t son de dimensión (N+2)*(M+2), se recorren solo los puntos interiores
  *   de la malla, y en los bordes están almacenadas las condiciones de frontera (por defecto 0).
  */
+
+int validation(int N, int M){
+    char bashCommand[50];
+    int returnValue;
+    sprintf(bashCommand, "./poisson %d %d", N, M);
+
+    returnValue = system(bashCommand);
+    if (returnValue == -1) {
+        return returnValue;
+    }
+
+    returnValue = system("cmp res_poisson.txt res_poisson_par.txt");
+
+    system("rm res_poisson.txt res_poisson_par.txt");
+}
+
 void jacobi_step_parallel(int nLocal, int M, double *x, double *b, double *t, MPI_Request *req) {
     int i, j, ld = M + 2;
 
@@ -163,7 +179,7 @@ int main(int argc, char **argv) {
 
     if (myId == 0) {
         FILE *file;
-        file = fopen("res_poisson.txt", "w");
+        file = fopen("res_poisson_par.txt", "w");
         for (i = 1; i <= N; i++) {
             for (j = 1; j <= M; j++) {
                 fprintf(file, "%.9f\t", res[i * ld + j]);
@@ -171,17 +187,13 @@ int main(int argc, char **argv) {
             fprintf(file, "\n");
         }
         fclose(file);
+        int check = validation(N, M);
+        if (check == 0) {
+            printf("El resultado es correcto\n");
+        } else {
+            printf("El resultado no es correcto\n");
+        }
     }
-
-    /* Imprimir solución (solo para comprobación, se omite en el caso de problemas grandes) */
-//    if (N <= 60 && myId == 0) {
-//        for (i = 1; i <= N; i++) {
-//            for (j = 1; j <= M; j++) {
-//                printf("%g ", res[i * ld + j]);
-//            }
-//            printf("\n");
-//        }
-//    }
 
     free(x);
     free(b);
